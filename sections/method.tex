@@ -1,0 +1,57 @@
+\section{System Model and Admission Rule}
+\label{sec:method}
+
+\subsection{Model}
+
+We consider a set of edge nodes $\mathcal{N}$ connected by links whose effective bandwidth $b_{ij}$ between nodes $i$ and $j$ is measured, not assumed.
+A request $r$ arrives at node $i$ with a latency SLO $D_r$ and an elapsed time $t_r$ at the moment of the admission decision.
+The KV cache of $r$ occupies $s_r$ bytes, and node $j$ can accept the request only if its free cache capacity exceeds $s_r$.
+The transfer time from $i$ to $j$ is modelled as
+\begin{equation}
+\label{eq:transfer}
+  T^{\mathrm{xfer}}_{r}(i,j) \;=\; \frac{s_r}{b_{ij}} \;+\; \ell_{ij},
+\end{equation}
+where $\ell_{ij}$ is the one-way propagation delay and the first term is the serialisation delay of the cache.
+
+\subsection{Admission rule}
+
+A request is migrated from $i$ to $j$ only when the predicted transfer time fits inside the slack that remains before the deadline, with a safety margin $\gamma \in [0,1)$:
+\begin{equation}
+\label{eq:admit}
+  T^{\mathrm{xfer}}_{r}(i,j) \;\le\; (1-\gamma)\,\bigl(D_r - t_r\bigr).
+\end{equation}
+When \eqref{eq:admit} fails, the request stays queued at node $i$.
+The margin $\gamma$ absorbs estimation error in $b_{ij}$; larger values trade throughput for a lower risk of a late completion.
+
+\subsection{Pipeline}
+
+Figure~\ref{fig:pipeline} shows where the decision sits in the request path.
+The estimate is produced after the prompt has been tokenised but before any decode step runs, so a rejected migration costs only the estimate itself.
+
+\begin{figure}[t]
+  \centering
+  \begin{tikzpicture}[
+      node distance=7mm and 9mm,
+      box/.style={draw, rounded corners=2pt, align=center, font=\small,
+                  minimum height=8mm, minimum width=21mm},
+      arr/.style={-{Latex[length=2mm]}, thick}]
+    \node[box] (arrive) {request\\arrives};
+    \node[box, right=of arrive] (est) {estimate\\$b_{ij}$};
+    \node[box, right=of est] (test) {test\\\eqref{eq:admit}};
+    \node[box, right=of test] (mig) {migrate\\cache};
+    \node[box, below=of test] (queue) {queue\\locally};
+    \draw[arr] (arrive) -- (est);
+    \draw[arr] (est) -- (test);
+    \draw[arr] (test) -- node[above, font=\scriptsize]{pass} (mig);
+    \draw[arr] (test) -- node[right, font=\scriptsize]{fail} (queue);
+  \end{tikzpicture}
+  \caption{Placement of the admission test in the request path.
+           The estimate is the only added work on the critical path.}
+  \label{fig:pipeline}
+\end{figure}
+
+\subsection{Estimation error}
+
+If the measured bandwidth is $\hat{b}_{ij} = b_{ij}(1+\epsilon)$ with relative error $\epsilon$, the predicted transfer time in \eqref{eq:transfer} is off by a factor of $1/(1+\epsilon)$.
+A negative error therefore makes the policy optimistic: it admits migrations that will finish late.
+The margin $\gamma$ is the only defence against that direction of error, which is why the results below sweep $\gamma$ rather than tuning it.

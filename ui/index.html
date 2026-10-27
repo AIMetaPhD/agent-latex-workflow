@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent-first Paper Workflow — Local Workbench</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="bar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">§</span>
+    <span id="project-name">Paper workbench</span>
+  </div>
+  <nav aria-label="Sections">
+    <a href="#env">Environment</a>
+    <a href="#build">Build</a>
+    <a href="#preview">Preview</a>
+    <a href="#prompt">Agent prompt</a>
+    <a href="#git">Git</a>
+  </nav>
+  <button id="theme-toggle" class="ghost" type="button" aria-label="Toggle theme">◐</button>
+</header>
+
+<main id="main">
+
+  <section id="unlock" class="card hidden" aria-labelledby="unlock-h">
+    <h2 id="unlock-h">Unlock this session</h2>
+    <p class="lede">The workbench needs the token from the URL you launched it with.
+      If the address bar has no <code>#t=…</code> part, copy the URL printed by the
+      launcher.</p>
+    <form id="unlock-form" class="row">
+      <label class="sr" for="unlock-token">Bootstrap token</label>
+      <input id="unlock-token" type="password" autocomplete="off" placeholder="paste the token">
+      <button type="submit">Unlock</button>
+    </form>
+    <p id="unlock-error" class="error" role="alert"></p>
+  </section>
+
+  <section id="env" class="card" aria-labelledby="env-h">
+    <h2 id="env-h"><span class="step">1</span> Environment</h2>
+    <p class="lede" id="env-summary">Checking what is installed…</p>
+    <ul id="env-list" class="deps"></ul>
+  </section>
+
+  <section id="build" class="card" aria-labelledby="build-h">
+    <h2 id="build-h"><span class="step">2</span> Build</h2>
+    <p class="lede">Runs <code>latexmk</code> in this repository. It reads
+      <code>.latexmkrc</code>, so the command here is the same one you would type.</p>
+    <div class="row">
+      <button id="build-btn" type="button">Compile the paper</button>
+      <span id="build-state" class="pill idle" role="status" aria-live="polite">idle</span>
+    </div>
+    <div id="build-meta" class="meta"></div>
+    <div id="build-problem" class="problem hidden" role="alert"></div>
+    <details id="build-log-wrap" class="log-wrap">
+      <summary>Build log</summary>
+      <pre id="build-log" tabindex="0" aria-label="Build log"></pre>
+    </details>
+  </section>
+
+  <section id="preview" class="card" aria-labelledby="preview-h">
+    <h2 id="preview-h"><span class="step">3</span> Preview</h2>
+    <div class="row">
+      <button id="pdf-btn" type="button">Open the latest PDF</button>
+      <button id="code-btn" type="button" class="ghost">Open in VS Code</button>
+    </div>
+    <p id="preview-note" class="note"></p>
+    <div id="pdf-frame-wrap" class="pdf-wrap hidden">
+      <iframe id="pdf-frame" title="Latest compiled PDF"></iframe>
+    </div>
+  </section>
+
+  <section id="prompt" class="card" aria-labelledby="prompt-h">
+    <h2 id="prompt-h">Agent prompt</h2>
+    <p class="lede">Builds a scoped task for your coding agent. It generates text
+      only — nothing is sent anywhere by this page.</p>
+    <div class="row wrap">
+      <label for="prompt-target">Target section</label>
+      <select id="prompt-target"></select>
+      <label for="prompt-kind">Task</label>
+      <select id="prompt-kind"></select>
+      <button id="prompt-btn" type="button">Generate</button>
+    </div>
+    <textarea id="prompt-out" rows="12" readonly aria-label="Generated prompt"
+              placeholder="Choose a section and a task, then press Generate."></textarea>
+    <div class="row">
+      <button id="copy-btn" type="button" class="ghost">Copy</button>
+      <span id="copy-state" class="note" role="status" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section id="git" class="card" aria-labelledby="git-h">
+    <h2 id="git-h">Git (read-only)</h2>
+    <p class="lede">This panel never runs a Git command that writes. No commit, no
+      branch, no checkout, no reset, no push.</p>
+    <div id="git-body"></div>
+  </section>
+
+  <section class="card muted" aria-labelledby="privacy-h">
+    <h2 id="privacy-h">What leaves this machine</h2>
+    <p><strong>This workbench sends nothing.</strong> No model API, no telemetry, no
+      external fonts, scripts or images. It talks only to
+      <code>127.0.0.1</code>.</p>
+    <p>If you then hand the generated prompt to Claude Code, Codex or another agent,
+      <em>that tool</em> decides what to send and where, under its own policy. The two
+      are separate; this page cannot make that decision for you.</p>
+    <p>Compiling runs <code>latexmk</code>, and <code>.latexmkrc</code> is Perl: a build
+      executes code from this repository. Only build repositories you trust.</p>
+  </section>
+
+</main>
+
+<footer>
+  <span id="footer-root"></span>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

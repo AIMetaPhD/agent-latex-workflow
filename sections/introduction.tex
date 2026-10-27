@@ -1,0 +1,21 @@
+\section{Introduction}
+\label{sec:intro}
+
+Edge inference clusters place small accelerator pools close to users, and each pool must serve many tenants at once.
+Because a single accelerator can hold only a bounded number of KV caches, a node that is temporarily overloaded has two options: queue the request locally, or migrate it to a peer that still has cache capacity.
+Queueing is cheap but risks violating the latency SLO, while migration protects the SLO at the cost of moving state over a constrained network link.
+Prior systems treat this decision as a scheduling problem and assume that cache transfer is either free or uniformly expensive~\cite{smith2024}.
+That assumption is fragile at the edge, where link quality varies by an order of magnitude within a single minute~\cite{lee2025}.
+
+This paper asks a narrower question: if a node can estimate the transfer time of a KV cache before committing to a migration, how much SLO compliance does that estimate buy?
+We answer it with a policy that compares the predicted transfer time against the SLO slack that remains when the request arrives.
+The policy is intentionally simple, because our goal is a reproducible baseline rather than a new scheduler.
+We make three contributions.
+First, we formalise the admission test as a single inequality over predicted transfer time and remaining slack.
+Second, we describe how the test degrades when the estimate is noisy.
+Third, we report the behaviour of the policy on a synthetic workload that anyone can regenerate.
+
+The remainder of the paper is organised as follows.
+Section~\ref{sec:method} defines the system model and the admission rule.
+Section~\ref{sec:results} reports the synthetic results and discusses what they do and do not show.
+Section~\ref{sec:conclusion} lists the open questions that a real deployment would have to answer.

@@ -1,0 +1,11 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+We described a single-inequality admission rule for KV cache migration at the edge and reported its behaviour on a synthetic workload.
+The rule is cheap to evaluate, it degrades predictably as the bandwidth estimate becomes optimistic, and it leaves an explicit safety margin that a deployment can tune.
+The results are a worked example of a reproducible paper repository, not a claim about real systems.
+
+Two questions remain open.
+The first is how to obtain a bandwidth estimate whose error is bounded in the tail rather than on average, since the admission rule is most sensitive exactly there.
+The second is whether a per-request rule composes into a stable cluster-level policy once many nodes admit migrations at the same time.
+Both questions require measurements that a synthetic workload cannot provide.

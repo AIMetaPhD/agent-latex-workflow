@@ -1,0 +1,17 @@
+# Normalise line endings so diffs, latexdiff output and CI are reproducible
+# across Windows, macOS and Linux.
+* text=auto eol=lf
+
+# Binary assets must never be converted.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.zip   binary
+*.gz    binary
+
+# Shell scripts must keep LF even on Windows checkouts.
+*.sh      text eol=lf
+*.py      text eol=lf
+.gitignore text eol=lf

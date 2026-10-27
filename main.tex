@@ -1,0 +1,49 @@
+% ---------------------------------------------------------------------------
+% Agent-first Paper Workflow — synthetic sample paper.
+%
+% Every number, citation and result in this file is a PLACEHOLDER invented to
+% demonstrate the workflow. Nothing here is a real experimental finding.
+% Replace sections/*.tex and references.bib with your own content.
+%
+% Build:  latexmk            (reads .latexmkrc, writes to build/)
+% ---------------------------------------------------------------------------
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+
+\newcommand{\sysname}{KV-Migrate}
+
+\title{Cache-Aware Migration for Latency-SLO LLM Serving at the Edge:\\
+       A Synthetic Worked Example}
+\author{Anonymous Sample Author\\
+        \small Synthetic Example University\\
+        \small \texttt{sample@example.invalid}}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\input{sections/abstract}
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/method}
+\input{sections/results}
+\input{sections/conclusion}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

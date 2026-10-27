@@ -1,0 +1,120 @@
+# Build and check the sample paper.
+#
+# Security posture (read this before editing):
+#   * `pull_request` from a fork runs with a read-only token and no secrets.
+#   * We do NOT compile pull requests from forks at all. A `.latexmkrc` is Perl
+#     and `latex-action`'s `pre_compile` is arbitrary bash; compiling an
+#     untrusted contribution executes that contributor's code in our runner.
+#     A trusted maintainer can re-run the build from a branch in this repo.
+#   * `permissions:` is the minimum needed to read the repo and upload an
+#     artifact. There are no repository secrets in this workflow.
+#   * `-shell-escape` is never enabled. That removes one class of risk; it does
+#     not make an untrusted document safe. See docs/security.md.
+
+name: latex
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: latex-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build sample paper
+    runs-on: ubuntu-latest
+    # Never build a pull request that comes from a fork.
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Refuse to build untrusted forks
+        if: >
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error::Fork pull requests are not compiled. A maintainer must copy the branch into this repository first."
+          exit 1
+
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      # Pinned to the 4.1.0 commit, verified 2026-10-26 via the GitHub API.
+      # The action runs latexmk inside ghcr.io/xu-cheng/texlive-alpine.
+      - name: Compile with latexmk
+        uses: xu-cheng/latex-action@6549dc21effb2730855a1281407ecfcececc6c1b  # 4.1.0
+        with:
+          root_file: main.tex
+          texlive_version: 2025
+          os: alpine
+          compiler: latexmk
+          # Match .latexmkrc ($out_dir = build). Do not add -shell-escape.
+          args: -pdf -file-line-error -halt-on-error -interaction=nonstopmode
+
+      - name: Show what was produced
+        run: |
+          echo "--- PDFs in the workspace ---"
+          find . -name '*.pdf' -not -path './.git/*' -printf '%s\t%p\n' | sort -k2
+          test -s build/main.pdf || { echo "::error::build/main.pdf is missing"; exit 1; }
+
+      - name: Check the build log for warnings
+        run: |
+          if grep -nE '^(LaTeX Warning|Package .* Warning|! )' build/main.log; then
+            echo "::warning::The build produced warnings; see the lines above."
+          else
+            echo "No LaTeX warnings."
+          fi
+
+      - name: Guardrail (read-only regions unchanged since the base)
+        run: |
+          set +e
+          BASE="origin/${{ github.base_ref }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=50 origin "${{ github.base_ref }}"
+            python3 -I tools/check_invariants.py --base "$BASE" --mode polish
+            code=$?
+          else
+            python3 -I tools/check_invariants.py --base HEAD --mode polish
+            code=$?
+          fi
+          # 3 = NOT_VERIFIED: report it, do not fail the build on a parser limit.
+          if [ "$code" = "2" ]; then
+            echo "::error::A read-only region changed (see the findings above)."
+            exit 1
+          fi
+          if [ "$code" = "3" ]; then
+            echo "::warning::The guardrail could not verify every file (exit 3)."
+          fi
+          exit 0
+
+      - name: Publication audit (no personal data, no credentials)
+        run: python3 -I tools/publish_audit.py --tree-only
+
+      - name: Upload the PDF
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: paper-pdf
+          path: build/main.pdf
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: build-log
+          path: |
+            build/main.log
+            build/main.blg
+          if-no-files-found: warn
+          retention-days: 14

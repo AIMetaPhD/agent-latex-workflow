@@ -1,0 +1,7 @@
+% Synthetic abstract. Every figure below is a placeholder, not a measurement.
+Large language model (LLM) inference at the network edge must serve requests under latency service-level objectives (SLOs) while sharing scarce accelerator memory across tenants.
+When a request is migrated between edge nodes, its key-value (KV) cache must move with it, and the migration cost competes directly with the compute budget of the target node.
+This paper studies that trade-off with a deliberately small, fully synthetic workload, so that the workflow itself can be reproduced without any private data.
+We describe a migration policy that admits a request only when the predicted cache-transfer time fits inside the remaining SLO slack, and we report how the policy behaves as the cache size grows.
+On the synthetic workload the policy keeps 92.4\% of requests inside the SLO, compared with 78.1\% for an always-migrate baseline.
+These numbers exist only to exercise the build, diff and review pipeline; they are not evidence about real deployments.
