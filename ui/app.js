@@ -266,6 +266,13 @@ $("pdf-btn").addEventListener("click", async () => {
   note.textContent = "Showing build/main.pdf (build " + bust + ").";
   $("pdf-frame").src = "/api/pdf?b=" + bust;
   wrap.classList.remove("hidden");
+
+  // The frame can stay blank even though the PDF arrived: some browsers (and
+  // every headless run) do not render the built-in PDF viewer inside an
+  // iframe. Offer a direct link so a blank frame is never a dead end.
+  const direct = $("pdf-direct");
+  direct.href = "/api/pdf?b=" + bust;
+  direct.classList.remove("hidden");
 });
 
 $("code-btn").addEventListener("click", async () => {
