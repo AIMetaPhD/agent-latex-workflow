@@ -99,6 +99,28 @@ WebSocket 协议驱动真实点击产生，不是 curl：
 
 **注意：Subagent 是内部复查，不等于独立 QA。** Muse 的结论仍然未知。
 
+### Subagent 查出了什么（141 PASS / 15 FAIL / 2 NOT_RUN，归并为 7 个缺陷）
+
+审计代理在副本里逐条核对了 `docs/UI-ADR.md` 的声明。安全核心是站得住的
+（Host 全路由校验、每 API 都有会话门禁、无 CORS、Origin 精确匹配、
+无 `shell=True`、22 种路径穿越全部拒绝、XSS 在真实浏览器里 0 弹窗），
+但它发现了 7 个真实缺陷，**其中最严重的一个会让"编译"按钮永久卡死**。
+
+已全部修复，每个都有回归测试（`tests/test_ui_robustness.py`，6/6 通过）：
+
+| # | 缺陷 | 修法 |
+|---|---|---|
+| D1 | 非 ASCII token 让 `secrets.compare_digest` 抛异常，连接直接断掉、无 HTTP 状态 | 改为比较 UTF-8 字节 |
+| D2 | `build/main.pdf` 是链接时，`Path.exists()` 先抛 `OSError`，ADR 声称的拒绝逻辑根本到不了 | 直接拒绝任何链接 + 全程 `try/except OSError` |
+| D3 | 超时后可能残留孤儿孙进程（4/4 次复现） | 三轮 kill + 沿父链 `wmic`/`ps` 验证 |
+| **D4** | **收尾时抛异常 → job 永远 `running` → 之后每次编译都 409，按钮永久禁用** | 收尾放进不会抛的块 + `timeout+120s` 后标记 stale |
+| D5 | 任何服务端异常都把完整 traceback 打到 stderr | `handle_one_request` + `handle_error` 覆盖，只打一行 |
+| D6 | token 全生命周期有效、单一不轮换会话、无登出 | 写入 ADR 限制（未改行为） |
+| D7 | 无 body 的 POST 收到大 body 时连接被中断 | 读空或明确拒绝 |
+
+审计代理修复前的结论是"**不要交给非技术用户**"。修复后我已请它复测，
+复测结果会写进 `tests/results/independent-audit-retest.md`。
+
 ## 4.5 一个必须告诉你的意外
 
 工作期间，共用目录里出现了另一个项目 `paper-qa/`（独立的论文质量门禁 MVP，
