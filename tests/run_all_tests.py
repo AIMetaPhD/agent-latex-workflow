@@ -28,6 +28,7 @@ SUITES = [
     ("publication audit", ["tools/publish_audit.py"]),
     ("root resolution from foreign cwd", ["tests/test_root_resolution.py"]),
     ("no-TeX degradation", ["tests/test_no_tex_degradation.py"]),
+    ("UI robustness (audit regressions)", ["tests/test_ui_robustness.py"]),
     ("UI security", ["tests/test_ui_security.py"]),
     ("UI build behaviour", ["tests/test_ui_build.py"]),
 ]

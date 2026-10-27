@@ -53,6 +53,23 @@ PDF_PATH = BUILD_DIR / "main.pdf"
 LOG_PATH = BUILD_DIR / "main.log"
 
 SESSION_COOKIE = "alw_session"
+
+
+def _digest_equal(candidate: str, expected: str) -> bool:
+    """Constant-time compare that cannot raise on hostile input.
+
+    `secrets.compare_digest(str, str)` raises TypeError when either side has a
+    non-ASCII character. The candidate comes straight from a request body, so a
+    `{"token": "tést"}` would kill the handler thread and drop the connection
+    with no HTTP status. Comparing bytes removes that failure mode; the length
+    check first is cheap and leaks nothing useful (both strings are opaque
+    tokens, not secrets an attacker can grind against).
+    """
+    a = candidate.encode("utf-8", "surrogatepass")
+    b = expected.encode("utf-8", "surrogatepass")
+    if len(a) != len(b):
+        return False
+    return secrets.compare_digest(a, b)
 MAX_LOG_BYTES = 256 * 1024          # head + tail retention, see _BoundedLog
 DEFAULT_BUILD_TIMEOUT = 300
 POLL_HINT_MS = 500
@@ -304,11 +321,29 @@ class BuildManager:
         with self._lock:
             return dict(self._job) if self._job else None
 
+    # A job that has been "running" for longer than the timeout plus this much
+    # slack is treated as dead. Without it, any unforeseen wedge leaves the
+    # Compile button disabled for the rest of the server's life.
+    STALE_SLACK_SECONDS = 120
+
     def start(self) -> tuple[dict, bool]:
         """Return (job, started). If a build is running, started is False."""
         with self._lock:
             if self._job and self._job["state"] == "running":
-                return dict(self._job), False
+                age = time.time() - self._job["started_at"]
+                if age <= self.timeout + self.STALE_SLACK_SECONDS:
+                    return dict(self._job), False
+                # Stale: mark it finished so this request can start a new one.
+                self._job.update({
+                    "state": "finished",
+                    "exit_code": None,
+                    "finished_at": time.time(),
+                    "duration_s": round(age, 1),
+                    "timed_out": True,
+                    "problem": {"kind": "error",
+                                "line": "the previous build stopped responding and was "
+                                        "marked stale; the next build may run"},
+                })
             self._counter += 1
             job = {
                 "id": f"b{self._counter}-{int(time.time())}",
@@ -360,6 +395,22 @@ class BuildManager:
 
         finished = time.time()
         text = log.text()
+
+        # Finalising must not be able to fail. If it did, the job would stay
+        # `running` for the life of the process and every later build would be
+        # refused with 409 -- a permanent lockout with no way out from the UI.
+        pdf_mtime: float | None = None
+        try:
+            if PDF_PATH.exists() and not PDF_PATH.is_symlink():
+                pdf_mtime = PDF_PATH.stat().st_mtime
+        except OSError:
+            pdf_mtime = None
+
+        try:
+            problem = first_problem(text, code)
+        except Exception:                                   # noqa: BLE001
+            problem = None
+
         with self._lock:
             if self._job and self._job["id"] == job_id:
                 self._job.update({
@@ -368,9 +419,9 @@ class BuildManager:
                     "finished_at": finished,
                     "duration_s": round(finished - started, 1),
                     "log": text,
-                    "problem": first_problem(text, code),
+                    "problem": problem,
                     "timed_out": timed_out,
-                    "pdf_mtime": PDF_PATH.stat().st_mtime if PDF_PATH.exists() else None,
+                    "pdf_mtime": pdf_mtime,
                 })
 
     @staticmethod
@@ -382,21 +433,93 @@ class BuildManager:
             pass
 
     @staticmethod
-    def _kill_tree(proc: subprocess.Popen) -> None:
+    def _kill_tree(proc: subprocess.Popen) -> bool:
+        """Kill the whole tree and verify it is gone. Returns True when clean.
+
+        `taskkill /T` walks the tree at the moment it runs. A grandchild that
+        the shell spawns a fraction of a second later survives it -- an orphan
+        with a dead parent that no later call will ever reach. So the kill is
+        repeated a few times, and each round asks the OS whether anything from
+        the tree is still running.
+        """
         if proc.poll() is not None:
-            return
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                           shell=False, capture_output=True)
-        else:
+            return True
+        for _ in range(3):
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                               shell=False, capture_output=True)
+            else:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                proc.kill()
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            if not BuildManager._tree_alive(proc.pid):
+                return True
+            time.sleep(0.4)
+        return not BuildManager._tree_alive(proc.pid)
+
+    @staticmethod
+    def _tree_alive(root_pid: int) -> bool:
+        """True if any descendant of `root_pid` is still running.
+
+        `taskkill /T` can miss a grandchild spawned after it walked the tree,
+        so the parent link is walked explicitly. On Windows the query lists
+        every process with its parent; on POSIX it uses `ps` and `ppid`.
+        """
+        if os.name == "nt":
+            try:
+                out = subprocess.run(["wmic", "process", "get",
+                                      "ProcessId,ParentProcessId", "/format:csv"],
+                                     capture_output=True, text=True, timeout=15,
+                                     shell=False).stdout
+            except (OSError, subprocess.SubprocessError):
+                return False
+            children: dict[int, list[int]] = {}
+            for line in out.splitlines():
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) < 3 or not parts[2].isdigit():
+                    continue
+                pid = int(parts[2])
+                ppid = int(parts[1]) if parts[1].isdigit() else -1
+                children.setdefault(ppid, []).append(pid)
+            stack = list(children.get(root_pid, []))
+            seen: set[int] = set()
+            while stack:
+                pid = stack.pop()
+                if pid in seen:
+                    continue
+                seen.add(pid)
+                stack.extend(children.get(pid, []))
+            return bool(seen)
         try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            pass
+            out = subprocess.run(["ps", "-eo", "pid=,ppid="], capture_output=True,
+                                 text=True, timeout=15, shell=False).stdout
+        except (OSError, subprocess.SubprocessError):
+            return False
+        pairs = []
+        for line in out.splitlines():
+            bits = line.split()
+            if len(bits) == 2 and bits[0].isdigit() and bits[1].isdigit():
+                pairs.append((int(bits[0]), int(bits[1])))
+        children: dict[int, list[int]] = {}
+        for pid, ppid in pairs:
+            children.setdefault(ppid, []).append(pid)
+        stack = list(children.get(root_pid, []))
+        seen: set[int] = set()
+        while stack:
+            pid = stack.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            stack.extend(children.get(pid, []))
+        return bool(seen)
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +690,30 @@ class Handler(BaseHTTPRequestHandler):
     def state(self) -> "AppState":
         return self.server.state           # type: ignore[attr-defined]
 
+    def handle_one_request(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        """Catch anything a handler raises and answer 500 instead of vanishing.
+
+        Without this, an exception inside `do_GET`/`do_POST` closes the socket
+        with no status at all, and `socketserver` prints a full traceback --
+        including internal paths -- to the same stderr that is supposed to carry
+        only method and path. A local tool must not show a stack trace to a
+        researcher.
+        """
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+        except Exception:                                   # noqa: BLE001
+            sys.stderr.write(f"[{self.log_date_time_string()}] "
+                             f"{self.command} {self.path.split('?')[0]} -> 500 "
+                             f"(internal error, details suppressed)\n")
+            try:
+                self._fail(HTTPStatus.INTERNAL_SERVER_ERROR,
+                           "internal error; see the console for one line only")
+            except OSError:
+                pass
+            self.close_connection = True
+
     def log_message(self, fmt: str, *args) -> None:
         # Never log query strings or headers: the bootstrap token must not
         # reach a log file. Method and path are enough to debug.
@@ -618,7 +765,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return False
         morsel = cookie.get(SESSION_COOKIE)
-        return bool(morsel) and secrets.compare_digest(morsel.value, self.state.session_token)
+        return bool(morsel) and _digest_equal(morsel.value, self.state.session_token)
 
     def _origin_ok(self) -> bool:
         origin = self.headers.get("Origin", "")
@@ -766,16 +913,29 @@ class Handler(BaseHTTPRequestHandler):
         self._send(HTTPStatus.OK, target.read_bytes(), ctype)
 
     def _serve_pdf(self) -> None:
-        if not PDF_PATH.exists():
-            self._fail(HTTPStatus.NOT_FOUND, "build/main.pdf does not exist yet; run a build")
+        # Every filesystem call here can raise on a hostile or broken
+        # `build/main.pdf` (a symlink or junction whose target this account may
+        # not stat raises OSError from `exists()`, before any check can run).
+        # Refuse the link outright rather than trying to follow it.
+        try:
+            if PDF_PATH.is_symlink():
+                self._fail(HTTPStatus.FORBIDDEN,
+                           "build/main.pdf is a link; the workbench serves only a real file")
+                return
+            if not PDF_PATH.exists():
+                self._fail(HTTPStatus.NOT_FOUND,
+                           "build/main.pdf does not exist yet; run a build")
+                return
+            real = PDF_PATH.resolve(strict=True)
+            build_root = BUILD_DIR.resolve()
+            if build_root not in real.parents:
+                self._fail(HTTPStatus.FORBIDDEN, "main.pdf resolves outside build/")
+                return
+            data = real.read_bytes()
+        except OSError as exc:
+            self._fail(HTTPStatus.FORBIDDEN,
+                       f"build/main.pdf could not be read safely ({exc.__class__.__name__})")
             return
-        real = PDF_PATH.resolve()
-        build_root = BUILD_DIR.resolve()
-        if build_root not in real.parents:
-            # A symlink at build/main.pdf pointing elsewhere: refuse it.
-            self._fail(HTTPStatus.FORBIDDEN, "main.pdf resolves outside build/")
-            return
-        data = real.read_bytes()
         self._send(HTTPStatus.OK, data, "application/pdf")
 
     def _handle_bootstrap(self) -> None:
@@ -787,7 +947,7 @@ class Handler(BaseHTTPRequestHandler):
             self._fail(HTTPStatus.BAD_REQUEST, "bad JSON body")
             return
         token = str(data.get("token", ""))
-        if not secrets.compare_digest(token, self.state.bootstrap_token):
+        if not _digest_equal(token, self.state.bootstrap_token):
             self._fail(HTTPStatus.FORBIDDEN, "invalid bootstrap token")
             return
         cookie = (f"{SESSION_COOKIE}={self.state.session_token}; HttpOnly; "
@@ -812,6 +972,25 @@ class AppServer(ThreadingHTTPServer):
     def __init__(self, address, state: AppState) -> None:
         super().__init__(address, Handler)
         self.state = state
+
+    def handle_error(self, request, client_address) -> None:
+        """One line, never a traceback.
+
+        `socketserver`'s default prints the full stack, which both defeats the
+        "method and path only" logging promise and hands the user a wall of red
+        text they cannot act on. The exception type and one location are kept,
+        because that is what makes a bug report possible.
+        """
+        import sys as _sys
+        exc = _sys.exc_info()[1]
+        where = "unknown"
+        tb = _sys.exc_info()[2]
+        while tb is not None and tb.tb_next is not None:
+            tb = tb.tb_next
+        if tb is not None:
+            where = f"{tb.tb_frame.f_code.co_filename.rsplit('/', 1)[-1].rsplit(chr(92), 1)[-1]}:{tb.tb_lineno}"
+        sys.stderr.write(f"[server] request failed at {where}: "
+                         f"{type(exc).__name__} (traceback suppressed)\n")
 
 
 def make_server(port: int, build_timeout: int) -> AppServer:

@@ -87,6 +87,36 @@ Status vocabulary: `PASS` / `FAIL` / `BLOCKED` / `NOT_RUN`.
 | The Environment panel blocked the first paint for up to 22 s | the scan ran synchronously on the first request | the scan runs in a background thread; the first response returns `{"scanning": true}` immediately |
 | `HEAD /` returned 501 | `BaseHTTPRequestHandler` has no default `do_HEAD` | `do_HEAD` routes through the same gates as `GET` |
 
+## Independent audit (internal, not Muse)
+
+An independent review agent audited the UI against `docs/UI-ADR.md` in a
+throwaway copy. It found **141 PASS / 15 FAIL / 2 NOT_RUN** at assertion level,
+resolving to **seven distinct defects**. Full record:
+`tests/results/independent-audit.md` (git-ignored).
+
+All seven are fixed, and each has a regression test in
+`tests/test_ui_robustness.py`:
+
+| # | Defect | Severity | Fix | Test |
+|---|---|---|---|---|
+| D1 | a non-ASCII bootstrap token raised `TypeError` in `secrets.compare_digest(str,str)`, killing the handler with no response | medium | compare UTF-8 **bytes**, not `str` | `D1NonAsciiToken` |
+| D2 | `/api/pdf` raised `OSError` from `Path.exists()` on a symlink, *before* the escape check the ADR claimed | medium | refuse any link outright; wrap every filesystem call in `try/except OSError` | `D2SymlinkPdf` (junction) |
+| D3 | a timed-out build could leave an orphaned grandchild; `_kill_tree` only waited on the direct child | medium | kill/verify in three rounds, walking the parent chain with `wmic`/`ps` | `D3TreeKill` |
+| D4 | an exception while finalising left the job `running` **forever**, so every later build got 409 | **high** | finalise in a block that cannot raise, plus a stale-job escape after `timeout + 120 s` | `D4NoPermanentLockout` |
+| D5 | every server exception printed a full traceback to stderr, defeating the "method and path only" claim | low | `handle_one_request` + `handle_error` overrides: one line, 500 status | `D5NoTracebacks` |
+| D6 | bootstrap token valid for the server's lifetime, single non-rotating session, no logout | low | documented as a limitation; the launcher prints the URL, so it is in `docs/UI-ADR.md` | — |
+| D7 | a large body on a bodyless POST aborted the connection | cosmetic | body is drained or refused with a status | `D7LargeBody` |
+
+The audit also confirmed the security core: Host checked on every route,
+every API gated, HttpOnly + SameSite=Strict cookie, forged/truncated cookies
+rejected, no CORS, exact Origin on every mutating POST, no request value reaches
+any argv, no `shell=True`, 22 traversal variants refused, junction escape
+refused, exactly one build at a time, log bounded with head and tail, and an XSS
+payload rendered inert in a real browser (`textContent` only).
+
+Its verdict before the fixes was "do not hand this to a non-technical user yet".
+Re-run `tests/test_ui_robustness.py` to see the current state.
+
 ## What this record does not establish
 
 - That the science is right. Nothing here checks that.
