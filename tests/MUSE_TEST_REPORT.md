@@ -42,9 +42,23 @@ queue is designed so the producer cannot see the reason. Forcing a third attempt
 would be exactly the "change the packaging to get past the refusal" behaviour the
 project's own audit history forbids.
 
-**This now needs the user.** Either relay `muse-1`'s reason to me, or authorise
-me to ask it a narrower question — for example to report only the single most
-severe finding, with its reproduction, and nothing else.
+**The user authorised one narrow question** — "the single most severe finding,
+with its reproduction, and nothing else" — sent to both `muse-1` and `muse-3`:
+
+| Muse | Answer to the one question |
+|---|---|
+| muse-1 | finished, `result_status: rejected` again |
+| muse-3 | finished, `result_status: success` |
+
+So even a one-question request was declined by `muse-1`, while `muse-3` accepted
+it and reported success. Neither body is readable from the producer side, so the
+finding itself — if there is one — is still unknown here.
+
+That is the point at which the implementer stops asking. Reducing the scope
+twice and re-sending would be pressuring a reviewer that has already declined,
+which the project's own audit history forbids. **The user then authorised an
+independent review agent** to cover what Muse did not deliver; its record goes in
+`tests/results/independent-audit.md`, and it is an internal review, not Muse.
 
 Dispatch and polling scripts: `.dispatch/dispatch.py`, `.dispatch/dispatch_ui.py`,
 `.dispatch/poll.py`. These are not committed to the repository (`.dispatch/` is
