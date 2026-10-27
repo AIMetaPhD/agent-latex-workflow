@@ -101,11 +101,11 @@ All seven are fixed, and each has a regression test in
 |---|---|---|---|---|
 | D1 | a non-ASCII bootstrap token raised `TypeError` in `secrets.compare_digest(str,str)`, killing the handler with no response | medium | compare UTF-8 **bytes**, not `str` | `D1NonAsciiToken` |
 | D2 | `/api/pdf` raised `OSError` from `Path.exists()` on a symlink, *before* the escape check the ADR claimed | medium | refuse any link outright; wrap every filesystem call in `try/except OSError` | `D2SymlinkPdf` (junction) |
-| D3 | a timed-out build could leave an orphaned grandchild; `_kill_tree` only waited on the direct child | medium | kill/verify in three rounds, walking the parent chain with `wmic`/`ps` | `D3TreeKill` |
+| D3 | a timed-out build could leave an orphaned grandchild; `_kill_tree` only waited on the direct child | medium | **first attempt was wrong**: it verified cleanup with `wmic`, which no longer exists on Windows 11 24H2, so every check said "clean". Now a Win32 Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) holds every child the build starts, and closing it kills them all; the kill also runs on the normal-exit path, which used to report success while leaving a child | `D3TreeKill` |
 | D4 | an exception while finalising left the job `running` **forever**, so every later build got 409 | **high** | finalise in a block that cannot raise, plus a stale-job escape after `timeout + 120 s` | `D4NoPermanentLockout` |
 | D5 | every server exception printed a full traceback to stderr, defeating the "method and path only" claim | low | `handle_one_request` + `handle_error` overrides: one line, 500 status | `D5NoTracebacks` |
 | D6 | bootstrap token valid for the server's lifetime, single non-rotating session, no logout | low | documented as a limitation; the launcher prints the URL, so it is in `docs/UI-ADR.md` | — |
-| D7 | a large body on a bodyless POST aborted the connection | cosmetic | body is drained or refused with a status | `D7LargeBody` |
+| D7 | a large body on a bodyless POST aborted the connection | cosmetic | the body is drained up to 4 MiB before the 400, so the client always receives a status. The first attempt only fixed `/api/build`; `/api/prompt` still aborted until the drain was actually called on that route | `D7LargeBody` |
 
 The audit also confirmed the security core: Host checked on every route,
 every API gated, HttpOnly + SameSite=Strict cookie, forged/truncated cookies
@@ -115,7 +115,28 @@ refused, exactly one build at a time, log bounded with head and tail, and an XSS
 payload rendered inert in a real browser (`textContent` only).
 
 Its verdict before the fixes was "do not hand this to a non-technical user yet".
-Re-run `tests/test_ui_robustness.py` to see the current state.
+
+### Re-test: the auditor re-ran its own harness against the fixes
+
+Same reviewer, fresh copies from `HEAD`, using its own harness rather than this
+repository's tests. Verdicts: **D1, D2, D4, D5 FIXED; D3 STILL BROKEN; D7 half
+fixed.** It also found that two of my regression tests could never fail:
+
+- the D3 test grepped `tasklist` for the script name, which never appears (the
+  orphan's image is `sleep.exe`), so the assertion could not fail;
+- the D2 test's `os.symlink` always fails on this account, so only the junction
+  branch was ever exercised.
+
+All three are now fixed. The D3 test asserts on a marker in the process command
+line via PowerShell CIM, excluding the querying process itself -- which is what
+produced the earlier "five orphans" that were really the query matching itself.
+
+Two caveats remain from the re-test and are **not** closed:
+
+- the stale-build escape is `timeout + 120 s` (7 minutes at the default) and
+  there is no Cancel button in the UI;
+- the stale path records `timed_out: True` on a job that did not time out, so
+  the page says "stopped at the time limit" when it did not.
 
 ## What this record does not establish
 
