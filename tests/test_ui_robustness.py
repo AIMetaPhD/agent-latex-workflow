@@ -154,7 +154,7 @@ class D2SymlinkPdf(unittest.TestCase):
             os.symlink("../../AGENTS.md", link)
             return "symlink"
         except (OSError, NotImplementedError):
-            pass
+            self.symlink_attempt = "unavailable on this account"
         if os.name == "nt":
             target = project / "sections"
             proc = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
@@ -171,7 +171,8 @@ class D2SymlinkPdf(unittest.TestCase):
         if not kind:
             shutil.rmtree(project, ignore_errors=True)
             self.skipTest("this account can create neither a symlink nor a junction")
-        print(f"  link kind: {kind}")
+        print(f"  link kind: {kind}"
+              f"{' (symlink unavailable: ' + getattr(self, 'symlink_attempt', '') + ')' if kind == 'junction' else ''}")
         server = Server(project)
         try:
             status, _, body = server.request("GET", "/api/pdf",
@@ -215,12 +216,28 @@ class D3TreeKill(unittest.TestCase):
             self.assertIsNotNone(job, "the build never finished")
             self.assertTrue(job["timed_out"])
             time.sleep(3)
-            listing = (subprocess.run(["tasklist"], capture_output=True, text=True).stdout
-                       if os.name == "nt" else
-                       subprocess.run(["ps", "-eo", "args"], capture_output=True,
-                                      text=True).stdout).lower()
-            self.assertNotIn("alw-hang.sh", listing,
-                             "a descendant of the timed-out build is still running")
+            # `tasklist` prints image names only, so a grep for the script name
+            # never matches anything and the check cannot fail. Command lines
+            # come from PowerShell's CIM instead (`wmic` is gone from Windows 11
+            # 24H2), and the querying process itself contains the marker, so it
+            # must be excluded or the check always matches itself.
+            marker = "alw" + "-orphan-" + "marker"
+            if os.name == "nt":
+                query = ("Get-CimInstance Win32_Process | "
+                         "Where-Object { $_.CommandLine -like '*" + marker + "*' "
+                         "-and $_.ProcessId -ne $PID } | "
+                         "Select-Object -ExpandProperty ProcessId")
+                out = subprocess.run(["powershell", "-NoProfile", "-Command", query],
+                                     capture_output=True, text=True, timeout=60).stdout
+                survivors = [line.strip() for line in out.split() if line.strip().isdigit()]
+            else:
+                out = subprocess.run(["ps", "-eo", "args"], capture_output=True,
+                                     text=True).stdout
+                survivors = [line.strip() for line in out.splitlines()
+                             if marker in line and "ps -eo" not in line]
+            self.assertEqual(survivors, [],
+                             "a descendant of the timed-out build is still running: "
+                             + str(survivors[:3]))
         finally:
             server.stop()
             shutil.rmtree(project, ignore_errors=True)
@@ -256,12 +273,14 @@ class D4NoPermanentLockout(unittest.TestCase):
             shutil.rmtree(project, ignore_errors=True)
 
 
-class D5NoTracebacks(unittest.TestCase):
+class D9NoTracebacks(unittest.TestCase):
     """Nothing a client sends may put a traceback on stderr."""
 
-    def test_d5_fuzzing_produces_no_traceback(self) -> None:
+    def test_d9_fuzzing_produces_no_traceback(self) -> None:
         project = make_copy()
         server = Server(project)
+        # This test hammers the server with raw garbage. Run it last, or the
+        # sockets it leaves half-open disturb whichever case follows it.
         payloads = [
             b'{"token": "t\xc3\xa9st"}',
             b'{"token": [1,2,3]}',

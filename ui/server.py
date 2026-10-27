@@ -307,6 +307,97 @@ def first_problem(log_text: str, exit_code: int | None) -> dict | None:
 # Build job
 # ---------------------------------------------------------------------------
 
+class _JobObject:
+    """A Windows Job Object that kills every process in it when closed.
+
+    `taskkill /F /T` walks the tree once, at the moment it runs. A grandchild
+    started a fraction of a second later is not in that walk, and once its
+    parent dies it is re-parented somewhere unreachable -- no amount of
+    re-querying finds it. A Job Object is the OS-level answer: every process the
+    build starts inherits the job, and `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+    means closing the handle kills all of them, however deep and whenever
+    spawned. There is no race to lose.
+
+    On any non-Windows host, or if the API is unavailable, `available` is False
+    and the caller falls back to process groups.
+    """
+
+    def __init__(self) -> None:
+        self.handle = None
+        self.available = False
+        if os.name != "nt":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+            handle = kernel32.CreateJobObjectW(None, None)
+            if not handle:
+                return
+
+            class IO_COUNTERS(ctypes.Structure):
+                _fields_ = [(name, ctypes.c_ulonglong) for name in (
+                    "ReadOperationCount", "WriteOperationCount",
+                    "OtherOperationCount", "ReadTransferCount",
+                    "WriteTransferCount", "OtherTransferCount")]
+
+            class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("PerProcessUserTimeLimit", ctypes.c_int64),
+                    ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", wintypes.DWORD),
+                    ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t),
+                    ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t),
+                    ("PriorityClass", wintypes.DWORD),
+                    ("SchedulingClass", wintypes.DWORD),
+                ]
+
+            class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                    ("IoInfo", IO_COUNTERS),
+                    ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                    ("PeakJobMemoryUsed", ctypes.c_size_t),
+                ]
+
+            info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+            info.BasicLimitInformation.LimitFlags = 0x2000   # KILL_ON_JOB_CLOSE
+            ok = kernel32.SetInformationJobObject(
+                handle, 9, ctypes.byref(info), ctypes.sizeof(info))  # 9 = Extended
+            if not ok:
+                kernel32.CloseHandle(handle)
+                return
+            self.handle = handle
+            self.available = True
+            self._kernel32 = kernel32
+        except (OSError, AttributeError, ImportError):
+            self.available = False
+
+    def assign(self, pid: int) -> bool:
+        if not self.available or self.handle is None:
+            return False
+        try:
+            self._kernel32.AssignProcessToJobObject(self.handle, pid)
+            return True
+        except (OSError, AttributeError):
+            return False
+
+    def close(self) -> None:
+        if self.available and self.handle is not None:
+            try:
+                self._kernel32.CloseHandle(self.handle)
+            except (OSError, AttributeError):
+                pass
+        self.handle = None
+        self.available = False
+
+
 class BuildManager:
     """Runs at most one `latexmk` at a time, in the background."""
 
@@ -367,12 +458,18 @@ class BuildManager:
         argv = ["latexmk"]           # .latexmkrc supplies every flag
         timed_out = False
         code: int | None = None
+        # The job object is created before the child so the child inherits it.
+        # Closing it at the end of this method kills anything still running in
+        # it -- including on the "latexmk exited 0 but left a child" path, which
+        # a `.latexmkrc` can produce and which used to be reported as success.
+        job = _JobObject()
         try:
             self._proc = subprocess.Popen(
                 argv, cwd=str(ROOT), shell=False, text=True, encoding="utf-8",
                 errors="replace", stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 start_new_session=(os.name != "nt"),
             )
+            job.assign(self._proc.pid)
             assert self._proc.stdout is not None
             reader = threading.Thread(
                 target=self._drain, args=(self._proc.stdout, log), daemon=True)
@@ -391,6 +488,12 @@ class BuildManager:
             log.write(f"could not start latexmk: {exc}\n")
             code = 126
         finally:
+            # Whatever the exit path, nothing the build started may outlive it.
+            # With a job object this is one syscall and race-free; without one it
+            # falls back to the tree kill, which is best-effort by nature.
+            if not timed_out and self._proc is not None:
+                BuildManager._kill_tree(self._proc)
+            job.close()
             self._proc = None
 
         finished = time.time()
@@ -469,35 +572,28 @@ class BuildManager:
     def _tree_alive(root_pid: int) -> bool:
         """True if any descendant of `root_pid` is still running.
 
-        `taskkill /T` can miss a grandchild spawned after it walked the tree,
-        so the parent link is walked explicitly. On Windows the query lists
-        every process with its parent; on POSIX it uses `ps` and `ppid`.
+        Without a job object this is only a best-effort check, and it says so:
+        `taskkill /T` walks the tree once, and a grandchild spawned after that
+        walk is re-parented somewhere this query cannot follow. That is exactly
+        why the job object exists. This is the fallback for hosts where the job
+        object is unavailable.
+
+        `wmic` was removed in Windows 11 24H2, so the process list is read with
+        `tasklist`, which is present everywhere the product runs.
         """
         if os.name == "nt":
             try:
-                out = subprocess.run(["wmic", "process", "get",
-                                      "ProcessId,ParentProcessId", "/format:csv"],
+                out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"],
                                      capture_output=True, text=True, timeout=15,
                                      shell=False).stdout
             except (OSError, subprocess.SubprocessError):
                 return False
-            children: dict[int, list[int]] = {}
-            for line in out.splitlines():
-                parts = [p.strip() for p in line.split(",")]
-                if len(parts) < 3 or not parts[2].isdigit():
-                    continue
-                pid = int(parts[2])
-                ppid = int(parts[1]) if parts[1].isdigit() else -1
-                children.setdefault(ppid, []).append(pid)
-            stack = list(children.get(root_pid, []))
-            seen: set[int] = set()
-            while stack:
-                pid = stack.pop()
-                if pid in seen:
-                    continue
-                seen.add(pid)
-                stack.extend(children.get(pid, []))
-            return bool(seen)
+            # `wmic` is gone, so parent links are not available here. The only
+            # honest statement is "I cannot prove the tree is gone", and a
+            # descendant of `latexmk` on Windows is one of the TeX tools.
+            survivors = re.search(r'"(?:pdflatex|latexmk|bibtex|biber|xelatex|'
+                                  r'lualatex|makeindex)\.exe"', out, re.IGNORECASE)
+            return bool(survivors)
         try:
             out = subprocess.run(["ps", "-eo", "pid=,ppid="], capture_output=True,
                                  text=True, timeout=15, shell=False).stdout
@@ -783,12 +879,39 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _read_json(self, limit: int = 8192) -> dict | None:
+    # Bodies larger than this are refused -- but only after being drained, see
+    # `_drain_body`. A refusal that leaves the client mid-write makes Windows
+    # reset the connection with WSAECONNABORTED, and the 400 never arrives.
+    BODY_LIMIT = 8192
+    BODY_DRAIN_CAP = 4 * 1024 * 1024
+
+    def _drain_body(self, length: int) -> None:
+        """Consume the declared body so the client can finish its write.
+
+        Without this the handler answers while the client is still sending, and
+        the OS tears the connection down before the response is delivered.
+        """
+        remaining = min(length, self.BODY_DRAIN_CAP)
+        while remaining > 0:
+            chunk = self.rfile.read(min(65536, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+
+    def _read_json(self, limit: int | None = None) -> dict | None:
+        limit = self.BODY_LIMIT if limit is None else limit
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             return None
-        if length < 0 or length > limit:
+        if length < 0:
+            return None
+        if length > self.BODY_DRAIN_CAP:
+            # Absurd: refuse and drop the connection rather than read 4 GB.
+            self.close_connection = True
+            return None
+        if length > limit:
+            self._drain_body(length)
             return None
         raw = self.rfile.read(length) if length else b""
         if not raw:
