@@ -922,6 +922,21 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return data if isinstance(data, dict) else None
 
+    def _consume_any_body(self) -> None:
+        """Drain a request body on a route that does not use one.
+
+        A route that answers without reading the body leaves the client
+        mid-write, and Windows then resets the connection with WSAECONNABORTED
+        before the response is delivered. The response is correct; the client
+        just never sees it.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return
+        if 0 < length <= self.BODY_DRAIN_CAP:
+            self._drain_body(length)
+
     # -- routing -----------------------------------------------------------
     def do_HEAD(self) -> None:           # noqa: N802 - BaseHTTPRequestHandler API
         # Same routing and same gates as GET, without a body: a health check or a
@@ -989,6 +1004,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/build":
             if not self._guard(session=True, origin=True):
                 return
+            self._consume_any_body()
             job, started = self.state.builds.start()
             status = HTTPStatus.ACCEPTED if started else HTTPStatus.CONFLICT
             self._json(status, {"job": job, "started": started,
@@ -999,6 +1015,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/open-vscode":
             if not self._guard(session=True, origin=True):
                 return
+            self._consume_any_body()
             self._json(HTTPStatus.OK, open_vscode())
             return
 
