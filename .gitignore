@@ -55,3 +55,6 @@ tests/results/
 
 # A separate project that shares this working tree; not part of this repository
 paper-qa/
+
+# Local tooling scaffolding, not project content
+.claude/
