@@ -105,7 +105,7 @@ All seven are fixed, and each has a regression test in
 | D4 | an exception while finalising left the job `running` **forever**, so every later build got 409 | **high** | finalise in a block that cannot raise, plus a stale-job escape after `timeout + 120 s` | `D4NoPermanentLockout` |
 | D5 | every server exception printed a full traceback to stderr, defeating the "method and path only" claim | low | `handle_one_request` + `handle_error` overrides: one line, 500 status | `D5NoTracebacks` |
 | D6 | bootstrap token valid for the server's lifetime, single non-rotating session, no logout | low | documented as a limitation; the launcher prints the URL, so it is in `docs/UI-ADR.md` | — |
-| D7 | a large body on a bodyless POST aborted the connection | cosmetic | the body is drained up to 4 MiB before the 400, so the client always receives a status. The first attempt only fixed `/api/build`; `/api/prompt` still aborted until the drain was actually called on that route | `D7LargeBody` |
+| D7 | a large body on a bodyless POST aborted the connection | cosmetic | the body is drained (up to 4 MiB) before the 400 on **every** route that takes one. The second attempt missed `/api/build` and `/api/open-vscode`, which never read a body at all — the client got `ConnectionAbortedError` instead of the 202, and it only showed up when the suite was run in series | `D7LargeBody` |
 
 The audit also confirmed the security core: Host checked on every route,
 every API gated, HttpOnly + SameSite=Strict cookie, forged/truncated cookies
