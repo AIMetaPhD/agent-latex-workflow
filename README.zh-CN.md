@@ -1,3 +1,8 @@
+> **已归档 —— 这个方向是错的。** 本仓库是失败归档，保留下来是为了让下一次不要重复同样的错误，
+> 它不是一个可用的产品。原因、仍可复用的部分、以及已经踩过的坑见 [ARCHIVED.md](ARCHIVED.md)。
+>
+> v0.2 那部分（论文模板、`AGENTS.md`、Skills、工具链、CI）不属于这次失败，可以直接复用。
+
 # Agent-first Paper Workflow（中文入口）
 
 [English](README.md) | 简体中文

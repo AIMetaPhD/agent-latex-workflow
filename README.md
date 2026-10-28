@@ -1,3 +1,11 @@
+> **ARCHIVED — this direction was wrong.** This repository is a failure archive,
+> kept so the next attempt does not repeat the same mistakes. It is not a usable
+> product. See [ARCHIVED.md](ARCHIVED.md) for what happened, what is still worth
+> reusing, and the traps already paid for.
+>
+> The v0.2 part (paper template, `AGENTS.md`, skills, toolchain, CI) was not part
+> of the failure and can be reused.
+
 # Agent-first Paper Workflow
 
 English | [简体中文](README.zh-CN.md)
