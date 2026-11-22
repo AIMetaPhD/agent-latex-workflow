@@ -1,198 +1,108 @@
-> **已归档 —— 这个方向是错的。** 本仓库是失败归档，保留下来是为了让下一次不要重复同样的错误，
-> 它不是一个可用的产品。原因、仍可复用的部分、以及已经踩过的坑见 [ARCHIVED.md](ARCHIVED.md)。
->
-> v0.2 那部分（论文模板、`AGENTS.md`、Skills、工具链、CI）不属于这次失败，可以直接复用。
-
-# Agent-first Paper Workflow（中文入口）
+# Agent-first Paper Workflow（中文指南）
 
 [English](README.md) | 简体中文
 
-**Git 是记录，Agent 做机械工作，你决定什么是对的。**
+**Git 是事实记录，Agent 承担机械与润色工作，研究者决定科学真实性。**
 
-这是一个用于**私有**论文仓库的 GitHub 模板：编码 Agent（Claude Code、Codex、
-Cursor）可以在里面安全修改，而不用 Git 的合作导师能直接读 PDF 审阅。
+这是一个面向科研人员的 **私有** LaTeX 论文仓库 GitHub 模板。它让编程 Agent（如 Claude Code、Codex、Cursor、VS Code Copilot 等）能够在受控的边界内安全地修改论文，并为不使用 Git 的导师与合作者自动生成可直观审阅的 PDF 差异与变更摘要。
 
-它不是编辑器、不是 LaTeX 编译器、不是 SaaS、也不是新的 CLI。它就是一组文件：
-一份论文样例、一份契约（`AGENTS.md`）、三个技能、两步 GitHub Actions，以及四个
-职责单一、限制写清楚的脚本。
+本项目**不是**另一个在线编辑器，**不是** LaTeX 编译器封装，**不是** SaaS，也**不造**重型的自研 CLI。它是一套工程化、经过实测的模板规范：包含 100% 合成的多文件论文样本、一份核心契约（`AGENTS.md`）、三个关键 Agent Skills、轻量安全的 CI 构建流，以及四个边界明确的单用途审计与验证工具。
 
 ```
 你的论文仓库（私有）
-├── AGENTS.md             Agent 唯一需要遵守的契约
-├── CLAUDE.md             只指向 AGENTS.md，不存第二份规则
+├── AGENTS.md             Agent 唯一遵守的执行契约（限定修改范围与只读区域）
+├── CLAUDE.md             入口引导，严格指向 AGENTS.md，防止规则漂移
 ├── skills/               paper-edit / paper-review / paper-release
-├── main.tex + sections/  论文正文（附带一份纯合成样例）
-├── .latexmkrc            构建配置；它是 Perl，所以它算代码
-├── .github/workflows/    只在可信分支上构建
-└── tools/                PDF 差异、压缩包检查、审阅包、发布审计
+├── main.tex + sections/  多文件合成论文（开箱即用，支持公式/表格/交叉引用）
+├── .latexmkrc            构建配置（输出隔离至 build/，严格禁用 shell-escape）
+├── .github/workflows/    安全 CI 构建（仅在可信分支构建，最小权限）
+└── tools/                PDF 差异比对、Overleaf 迁移检查、审阅包生成、发布前脱敏
 ```
 
-## 为什么要做
+## 为什么选择本工作流
 
-Overleaf 让每个共享者都必须手动同步，而且没有 Agent 能安全操作的可审查历史。
-私有 Git 仓库解决了历史问题，却让导师更难读——除非 Agent 把每次修改都变成
-**PDF 加摘要**。
+- **告别 Overleaf 的手动同步困境**：利用私有 GitHub 仓库作为唯一的版本真值源，拥有完整的提交历史与分支隔离。
+- **保护学术不变量（Guardrail）**：严防 Agent 在润色时悄悄修改实验数值、数学公式、文献引用 Key 或作者单位。一旦越界，强制阻断并由人工确认。
+- **兼顾非 Git 合作者（导师审阅）**：一键生成由 `paper-clean.pdf`、`paper-diff.pdf` 和非技术性 `review-summary.md` 组成的审阅包，导师无需安装 Git 或配置 TeX 即可审阅。
+- **安全第一**：禁用 `-shell-escape`，严格防范不可信构建与外部恶意 LaTeX 代码注入。
 
-这个模板要填的缺口不是“AI 写 LaTeX”（已经有不少项目做得好，见
-[docs/competitor-audit.md](docs/competitor-audit.md)），而是围绕一篇**真实的、
-已在写的论文**的安全与审阅闭环：Agent 在自己的范围内工作、导师能读懂的差异、
-以及不会悄悄执行别人代码的构建。
+## 快速上手
 
-## 快速开始（Windows / macOS / Linux）
+### 前置条件
 
-前置条件：Git、带 `latexmk` 与 `bibtex` 的 TeX 发行版（TeX Live 或 MiKTeX）、
-Python 3.10+（本地工作台用）。**编译论文不需要任何 API Key**，也不需要
-`pip install` 任何包。
+- **Git**（≥ 2.23）
+- **TeX 发行版**：安装包含 `latexmk` 与 `bibtex` 的 TeX Live 或 MiKTeX
+- **Python**（≥ 3.10，仅需标准库，无需安装任何 pip 第三方包）
 
-### 1. 打开工作台（交互式，推荐）
+编译与本地管理论文**无需任何外部模型 API Key**。
 
-双击对应系统的启动器：
+### 1. 从模板创建仓库
 
-| 系统 | 文件 |
-|---|---|
-| Windows | `start-ui.bat` |
-| macOS | `start-ui.command` |
-| Linux | `start-ui.sh` |
-
-浏览器会打开 `http://127.0.0.1:8765/`，上面是三个带编号的步骤：
-**环境体检**（装了什么、缺什么）、**编译**（一个按钮、真实日志、高亮第一个错误）、
-**预览**（最新 PDF，以及用 VS Code 打开本项目）。再往下是 Agent 提示词生成器和
-只读 Git 面板。
-
-启动器从脚本自身位置定位项目，所以在任何工作目录下双击都能用。它只负责找
-Python，不负责找 TeX：没有 TeX 时工作台照样启动，只是编译按钮被禁用并说明原因。
-
-### 2. 命令行编译（进阶）
+在 GitHub 页面点击 **Use this template** 创建你自己的**私有（Private）**论文仓库，并克隆到本地：
 
 ```bash
-latexmk                                   # 生成 build/main.pdf
+git clone <你的私有仓库链接>
+cd <你的仓库目录>
 ```
 
-然后替换样例内容：改 `sections/*.tex`、`main.tex` 和 `references.bib`。
-样例是刻意合成的，不含任何人的未发表工作。
+### 2. 验证本地编译
 
-端口、是否开浏览器、编译超时都可以在命令行指定：
+使用原生 `latexmk` 驱动编译：
 
 ```bash
-python ui/server.py --port 8765 --no-browser --print-url --build-timeout 120
+latexmk
 ```
 
+编译产物会自动输出至 `build/main.pdf`，终端会显示耗时与退出码。
 
-## 怎么用
+### 3. 替换为你的真实论文
 
-| 你想做的事 | 对 Agent 说的话 | 你会得到 |
+将合成样本替换为你自己的正文内容：
+- 文档结构与宏包配置：`main.tex`
+- 正文各章节分片：`sections/*.tex`
+- 文献库：`references.bib`
+
+## 与 Agent 协同写作流程
+
+无论使用 Claude Code、Cursor 还是 Codex，请指示 Agent 遵守根目录的 `AGENTS.md`：
+
+| 任务场景 | 给 Agent 的指令提示 | 交付物与保障 |
 |---|---|---|
-| 润色一段文字 | “用 paper-edit，只润色 §2.2 的语言” | 分支、改动、构建、guardrail、变更记录 |
-| 看改了什么 | “用 paper-review，比较 main 和 agent/…” | 摘要、PDF 差异、审阅包 |
-| 发给导师 | “打包审阅” | `dist/review-pack/`：PDF、差异、清单 |
-| 冻结投稿版本 | “用 paper-release，阶段 submission” | 含提交号、PDF 哈希、环境的快照 |
+| 语言润色 | “遵循 AGENTS.md 和 skills/paper-edit，润色 §2.2，纯语言模式” | 独立分支、单句单行、编译检查、学术护栏检测、变更报告 |
+| 审阅差异 | “遵循 skills/paper-review，对比 main 与 agent/...” | 变更概述、多文件 PDF 差异、生成对比报告 |
+| 发送导师 | “打包审阅成果 review pack” | `dist/review-pack/` 内含完整 PDF、差异标注与清单 |
+| 定稿快照 | “遵循 skills/paper-release，生成投稿快照” | 记录 Git Commit SHA、PDF 校验和与编译环境的快照 Tag |
 
-Agent 只在 `agent/<日期>-<短名>` 分支工作，永不直接改 `main`，永不推送。
+Agent 默认在独立的分支（如 `agent/<日期>-<描述>`）上操作，严禁直接向 `main` 提交，严禁强制推送。
 
-## 哪些被强制，哪些没有
+## 自动化检查与防护矩阵
 
-| 检查项 | 工具 | 是否强制 |
+| 检查项 | 工具 | 拦截标准 |
 |---|---|---|
-| 论文仍能编译 | `latexmk` | 是，看退出码 |
-| 纯润色任务里数字/公式/引用/标签/作者未变 | `tools/check_invariants.py` | 是，退出码 `2` 阻止提交 |
-| 发布前无个人信息与凭据 | `tools/publish_audit.py` | 是，退出码 `2` 阻止发布 |
-| 压缩包不会逃出目标目录 | `tools/zip_inspect.py` | 是，禁止自动解压 |
-| PDF 差异里**真的**包含改动 | `tools/pdf_diff.py` | 是，抽取文本校验 |
-| **科学结论正确** | — | **否，从不声称** |
-| **参考文献真实存在** | — | **否；guardrail 只比对 key，不验证真伪** |
+| 编译正常通过 | `latexmk` | 退出码非 0 则报错阻断 |
+| 润色时数字/公式/引用未被改动 | `tools/check_invariants.py` | 检测到变动退出码为 2，强制人工审批 |
+| 源码无个人隐私、凭据泄露 | `tools/publish_audit.py` | 扫描工作区与 Git 历史，拦截泄露 |
+| Overleaf 压缩包安全性 | `tools/zip_inspect.py` | 拦截路径穿越（Zip Slip）、软链接与可执行脚本 |
+| 多文件 PDF 差异标注 | `tools/pdf_diff.py` | 校验差异文本提取与可见性 |
+| **科学真实性证明** | — | **绝不承诺；由研究者本人全权负责** |
 
-引用 guardrail 之前先读 [docs/guardrail.md](docs/guardrail.md)，那里写了已知漏检。
+关于护栏的设计范围与已知漏报边界，请参阅 [docs/guardrail.md](docs/guardrail.md)。
 
-## 安全模型（一段话）
+## 从 Overleaf 迁移已有论文
 
-`.latexmkrc` 是 Perl，以你的权限执行；`latex-action` 的 `pre_compile` 是任意 bash。
-因此 CI **只构建可信分支**，绝不构建 fork 的 PR，权限 `contents: read`，无 secrets，
-不开 `-shell-escape`。这去掉了一类风险，但**不等于**不可信文档就安全了。细节与残余
-风险见 [docs/security.md](docs/security.md)。
+切勿直接在工作区解压不可信来源的 ZIP。请参阅 [docs/migrate-from-overleaf.md](docs/migrate-from-overleaf.md)：
+1. 留存导出的原始 ZIP 和基准 PDF 作为基准底稿；
+2. 运行 `python tools/zip_inspect.py <overleaf-export.zip>` 进行安全性排查；
+3. 手动复制文件入库并完成初次 Commit，在干净状态下再引入 Agent。
 
-## 从 Overleaf 迁移
+## 验证测试套件
 
-不要把 ZIP 直接解压进仓库。按
-[docs/migrate-from-overleaf.md](docs/migrate-from-overleaf.md) 操作：先保留原始
-ZIP 和 baseline PDF，用 `tools/zip_inspect.py` 检查压缩包，手工拷入文件，并在
-Agent 动任何东西之前把 baseline 提交上去。
+如需验证本模板在你当前电脑上的全套护栏与工具可用性，请运行：
 
-## 不用 Git 也能审阅
+```bash
+python test_verify.py
+```
 
-[docs/collaborate-without-git.md](docs/collaborate-without-git.md) 说明了审阅包里
-有什么、导师该看哪里、以及这个包**刻意不声称**什么。
+## 开源许可证
 
-## 本地工作台
-
-`start-ui.bat`（Windows）/ `start-ui.command`（macOS）/ `start-ui.sh`（Linux）
-会在浏览器里打开一个页面，覆盖新手真正需要的五件事。它是本仓库的控制面板，
-不是编辑器。
-
-| 面板 | 做什么 | 明确不做 |
-|---|---|---|
-| 环境体检 | 检查 Git、Python、latexmk、LaTeX 引擎、BibTeX、Perl，以及可选的 VS Code 和 latexdiff；说明缺什么、为什么、官方安装命令 | 从不替你安装任何东西 |
-| 编译 | 后台运行 `latexmk`，显示真实状态、退出码、耗时、日志尾部和第一个错误 | 从不同时跑两个编译；从不执行自定义命令 |
-| 预览 | 以 `no-store` 提供 `build/main.pdf`，装了 VS Code 就打开本项目 | 从不读取其他任何文件 |
-| Agent 提示词 | 从 `sections/*.tex` 生成限定范围的任务提示词 | 从不调用模型，从不发送任何内容 |
-| Git | 显示分支、`git status --porcelain`、`git diff --stat` 和 guardrail | 永不 commit、branch、checkout、reset、push |
-
-安全设计：只绑定 `127.0.0.1`；每个请求都校验 `Host` 头（因此 DNS rebinding
-进不来）；要求会话 Cookie，其 token 走 URL fragment 而不是 query string 或日志；
-任何会改变状态的请求都校验 `Origin`；不输出任何 CORS 头。编译是固定命令、有超时、
-日志有上限。完整威胁模型和刻意不做的事见 [docs/UI-ADR.md](docs/UI-ADR.md)。
-
-**离开你机器的内容：没有。** 没有模型 API、没有遥测、没有外部字体/脚本/图片。
-如果你随后把生成的提示词交给某个 Agent，是那个工具按它自己的政策决定发什么——
-两者是分开的。
-
-## 环境要求（实测记录）
-
-| | 最低 | 本机实测 |
-|---|---|---|
-| Python | 3.10+（只用标准库） | 3.13.9 |
-| Git | 2.23（需要 `git switch`） | Windows 11 上 2.55.0 |
-| TeX Live | 2023，`latexmk` ≥ 4.7 | TeX Live 2025，`latexmk` 4.86a |
-| `latexdiff` + `latexpand` | 较新版本 | `latexdiff` 1.3.4，`latexpand` 1.7.2 |
-| Python（仅工具） | 3.10，仅标准库 | 3.13.9 |
-| `pdftotext`（差异校验，可选） | — | 已安装（Poppler） |
-
-`xelatex` / `lualatex` 由 TeX Live 支持，但本模板**只测过 `pdflatex`**。需要时改
-`.latexmkrc` 的 `$pdf_mode` 并自行验证字体，样例没有覆盖这条路径。
-
-## 常见问题
-
-**必须用 VS Code 吗？** 不必。任何编辑器都可以，LaTeX Workshop 只是最省事的
-“保存即编译”。
-
-**Agent 能替我写新的科学内容吗？** 能写你明确要求的文字。它不得编造结果、文献或
-数字；`AGENTS.md` §4 把这些区域设为只读，除非你另行授权。
-
-**guardrail 能证明论文没被改坏吗？** 不能。它报告指定类别里的 token 变化。句子重排或
-上下文替换可以一个 token 都不变而含义全变。
-
-**需要 API Key 吗？** 不需要。这里没有任何代码调用模型，Agent 自带。
-
-## 限制
-
-- 样例论文的数字是编的，不要引用。
-- 只测过 `pdflatex`。IEEEtran 兼容，但没有随仓库分发（类文件有自己的许可证）；
-  真实 IEEE 项目请把出版社原始文件留在你的私有仓库里。
-- 跨平台状态如实记录在 [tests/SELFTEST.md](tests/SELFTEST.md)：Windows 在本机实测，
-  macOS 为 `BLOCKED`，Linux 仅 GitHub Runner 层面的结论。
-- 四个脚本是维护成本。它们存在是因为每个都补上了现有工具补不了的缺口，且都写明了限制。
-
-## 许可证
-
-MIT。第三方组件是**依赖**而非拷贝，见
-[docs/competitor-audit.md](docs/competitor-audit.md) 与
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-## 致谢
-
-本项目刻意不去重复这些工作：
-[paper-lab](https://github.com/JoseAntonioNuevo/paper-lab)、
-[latex-paper-skills](https://github.com/yunshenwuchuxun/latex-paper-skills)、
-[paperops](https://github.com/giacomolanciano/paperops)、
-[alfred](https://github.com/dreadnode/alfred)、
-[PaperKit](https://github.com/peternicholls/PaperKit)，以及在 CI 里真正负责编译的
-[`xu-cheng/latex-action`](https://github.com/xu-cheng/latex-action)。
+本项目基于 MIT License 开源。关于引用的外部依赖与行为说明，详见 [LICENSE](LICENSE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

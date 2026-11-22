@@ -1,225 +1,123 @@
-> **ARCHIVED — this direction was wrong.** This repository is a failure archive,
-> kept so the next attempt does not repeat the same mistakes. It is not a usable
-> product. See [ARCHIVED.md](ARCHIVED.md) for what happened, what is still worth
-> reusing, and the traps already paid for.
->
-> The v0.2 part (paper template, `AGENTS.md`, skills, toolchain, CI) was not part
-> of the failure and can be reused.
-
 # Agent-first Paper Workflow
 
 English | [简体中文](README.zh-CN.md)
 
 **Git is the record. The agent does the mechanical work. You decide what is true.**
 
-A GitHub template for a **private** paper repository that a coding agent
-(Claude Code, Codex, Cursor) can edit safely, and that a co-author who does not
-use Git can review as a PDF.
+A clean, reproducible GitHub template for a **private** LaTeX paper repository that any coding agent (Claude Code, Codex, Cursor, VS Code Copilot) can edit safely, and that a supervisor or co-author who does not use Git can review as a PDF.
 
-This is not an editor, not a LaTeX compiler, not a SaaS product and not a new
-CLI. It is a small set of files: a template paper, one contract (`AGENTS.md`),
-three skills, two GitHub Actions steps and four single-purpose scripts whose
-limits are written down.
+This is not an editor, not a LaTeX compiler, not a SaaS product, and not a custom CLI. It is an agent-operable template: a synthetic sample paper, a strict contract (`AGENTS.md`), three targeted skills, CI workflows, and four single-purpose audit/verification tools whose limits are explicitly documented.
 
 ```
 your paper repo (private)
-├── AGENTS.md            the only contract an agent reads
-├── CLAUDE.md            points at AGENTS.md; no second copy of the rules
+├── AGENTS.md            the single contract an agent reads
+├── CLAUDE.md            points at AGENTS.md; no drifting rules
 ├── skills/              paper-edit, paper-review, paper-release
-├── main.tex + sections/ the paper (a synthetic sample ships with it)
-├── .latexmkrc           build config; it is Perl, so it is code
-├── .github/workflows/   build on trusted branches only
-└── tools/               pdf diff, archive inspection, review pack, audit
+├── main.tex + sections/ multi-file synthetic paper (compilable out of the box)
+├── .latexmkrc           build config (isolated build/, no-shell-escape)
+├── .github/workflows/   clean CI build on trusted branches
+└── tools/               pdf diff, archive inspection, review pack, publication audit
 ```
 
 ## Why
 
-Overleaf forces a manual sync for everyone who shares a project, and it has no
-reviewable history an agent can work against. A private Git repository fixes the
-history problem but makes the co-author's life harder — unless the agent turns
-each change into a PDF and a summary.
+Overleaf forces manual sync, lacks fine-grained history, and does not provide an isolated workspace for AI agents. A private Git repository fixes the version history problem, but makes review difficult for collaborators who do not use Git — unless the agent automatically packages each milestone into a clean PDF and a plain-language summary.
 
-The gap this template fills is not “AI writes LaTeX”. Several projects do that
-well (see [docs/competitor-audit.md](docs/competitor-audit.md)). The gap is the
-**safety and review loop around a real, existing paper**: an agent that stays in
-its lane, a diff a supervisor can read, and a build that cannot quietly execute
-somebody else's code.
+The gap this template fills is not "generating LaTeX code". Several projects already draft content (see [docs/competitor-audit.md](docs/competitor-audit.md)). The gap is the **safety, guardrails, and review loop around a real academic manuscript**:
+- an agent that stays in its lane without corrupting numbers, formulas, or citations;
+- a clear Git diff and PDF diff a supervisor can read;
+- a build setup that never quietly executes arbitrary code.
 
-## Quickstart (Windows, macOS, Linux)
+## Quickstart
 
-Requirements: Git, a TeX distribution with `latexmk` and `bibtex` (TeX Live or
-MiKTeX), and Python 3.10+ for the local workbench. **No API key is needed to
-build the paper**, and no Python package needs to be installed.
+### Prerequisites
 
-### 1. Open the workbench (the interactive way)
+- **Git** (≥ 2.23)
+- **TeX distribution** with `latexmk` and `bibtex` (TeX Live or MiKTeX)
+- **Python** (≥ 3.10, standard library only — no `pip install` required)
 
-Double-click the launcher for your system:
+No external API keys are required to build or manage the paper.
 
-| System | File |
-|---|---|
-| Windows | `start-ui.bat` |
-| macOS | `start-ui.command` |
-| Linux | `start-ui.sh` |
+### 1. Initialize from Template
 
-A browser opens at `http://127.0.0.1:8765/` with three numbered steps:
-**Environment** (what is installed and what is missing), **Build** (one button,
-real log, first error highlighted), **Preview** (the latest PDF and a button to
-open the folder in VS Code). Then the Agent prompt builder and a read-only Git
-panel.
-
-The launcher finds the project from its own location, so it works from any
-working directory. It looks for Python, not for a TeX install: without TeX the
-workbench still starts and the build button is disabled with an explanation.
-
-### 2. Compile from the command line (Advanced)
+Click **Use this template** on GitHub to create your own **private** repository, then clone it locally:
 
 ```bash
-latexmk                                   # builds build/main.pdf
+git clone <your-private-repo-url>
+cd <your-repo>
 ```
 
-Then replace the sample: edit `sections/*.tex`, `main.tex` and
-`references.bib`. The sample is deliberately synthetic, so nothing in it is
-anybody's unpublished work.
+### 2. Verify Local Build
 
-On Windows, `latexmk` runs under TeX Live's Perl. If `latexmk` is not on
-`PATH`, use the full path to `latexmk.exe` from your TeX installation.
-
-Port, browser and build timeout can be set on the command line:
+Compile the synthetic paper using native `latexmk`:
 
 ```bash
-python ui/server.py --port 8765 --no-browser --print-url --build-timeout 120
+latexmk
 ```
 
+The compiled PDF will be generated cleanly at `build/main.pdf`.
 
-## Workflow
+### 3. Edit Your Paper
 
-| You want | You say to the agent | What you get |
+Replace the synthetic sample with your own manuscript:
+- Preamble and structure: `main.tex`
+- Section prose: `sections/*.tex`
+- Bibliography: `references.bib`
+
+## Agent Workflow
+
+When asking an agent (Claude Code, Codex, Cursor, etc.) to collaborate, instruct it to follow `AGENTS.md`:
+
+| Goal | Instruction to Agent | Output |
 |---|---|---|
-| polish a paragraph | “use paper-edit, polish §2.2, language only” | branch, edit, build, guardrail, change record |
-| see what changed | “use paper-review, compare main with agent/…” | summary, PDF diff, review pack |
-| send it to a co-author | “pack the review” | `dist/review-pack/` with PDF, diff, manifest |
-| freeze a submission | “use paper-release, stage submission” | snapshot with commit, PDF hash, environment |
+| Polish prose | "Follow `AGENTS.md` and `skills/paper-edit`, polish §2.2, language only" | Isolated branch, prose edit, clean build, guardrail check, change record |
+| Review changes | "Follow `skills/paper-review`, compare `main` with `agent/...`" | Markdown summary, multi-file PDF diff, review pack |
+| Send to co-author | "Pack the review artifacts" | `dist/review-pack/` containing clean PDF, diff, and summary |
+| Submission snapshot | "Follow `skills/paper-release`, stage submission snapshot" | Immutable tag with commit SHA, PDF checksum, and environment note |
 
-The agent works on `agent/<date>-<slug>`, never on `main`, and never pushes.
+Agents work on dedicated branches (`agent/<date>-<slug>`), never commit directly to `main`, and never force-push.
 
-## What is enforced, and what is not
+## What is Enforced, and What is Not
 
 | Check | Tool | Enforced |
 |---|---|---|
-| the paper still compiles | `latexmk` | yes, exit code |
-| numbers / formulas / citations / labels / authors unchanged in a polish task | `tools/check_invariants.py` | yes, exit `2` blocks |
-| no personal data or credentials before publishing | `tools/publish_audit.py` | yes, exit `2` blocks |
-| a ZIP does not escape the destination | `tools/zip_inspect.py` | yes, refuses to advise extraction |
-| the PDF diff really shows the change | `tools/pdf_diff.py` | yes, text extraction check |
-| **the science is correct** | — | **no, never claimed** |
-| **the references are real** | — | **no; the guardrail checks keys, not accuracy** |
+| The paper still compiles | `latexmk` | Yes, exit code 0 |
+| Numbers, formulas, citation keys, labels, authors unchanged during polish | `tools/check_invariants.py` | Yes, exit code 2 blocks delivery |
+| No secrets, tokens, or local machine paths committed | `tools/publish_audit.py` | Yes, exit code 2 blocks publication |
+| Archive import does not escape directory (Zip Slip) | `tools/zip_inspect.py` | Yes, refuses dangerous extraction |
+| Multi-file PDF diff accurately highlights changes | `tools/pdf_diff.py` | Yes, verified text extraction |
+| **Scientific correctness** | — | **No, never claimed; author remains responsible** |
+| **Reference factual truth** | — | **No; guardrail verifies key preservation, not validity** |
 
-Read [docs/guardrail.md](docs/guardrail.md) before quoting the guardrail in a
-report. It has a known set of misses.
+For guardrail limitations and coverage boundaries, see [docs/guardrail.md](docs/guardrail.md).
 
-## Security model in one paragraph
+## Security Model
 
-`.latexmkrc` is Perl and runs with your permissions; `latex-action`'s
-`pre_compile` is arbitrary bash. CI therefore builds **trusted branches only**,
-never a fork's pull request, with `contents: read`, no secrets and no
-`-shell-escape`. That removes one class of risk; it does not make an untrusted
-document safe. Details and the residual risks: [docs/security.md](docs/security.md).
+`.latexmkrc` is executed as Perl code; CI steps can run arbitrary scripts. Therefore:
+- CI builds **trusted internal branches only** (`contents: read`), never untrusted external pull requests.
+- Shell escape (`-shell-escape`) is strictly disabled in `.latexmkrc`.
+- No sensitive credentials or secrets are accessible in build steps.
+- Detailed threat analysis: [docs/security.md](docs/security.md).
 
-## Migrating an existing Overleaf project
+## Overleaf Migration
 
-Do not unzip into the repository. Follow
-[docs/migrate-from-overleaf.md](docs/migrate-from-overleaf.md): keep the
-original ZIP and a baseline PDF, inspect the archive with
-`tools/zip_inspect.py`, copy files in by hand, and commit the baseline before
-the agent touches anything.
+Do not extract unknown archives directly into the working tree. Follow [docs/migrate-from-overleaf.md](docs/migrate-from-overleaf.md):
+1. Keep the exported `.zip` and baseline PDF as ground truth.
+2. Inspect the archive using `python tools/zip_inspect.py <export.zip>`.
+3. Safely copy files into the repository and commit the baseline before enabling agent edits.
 
-## Reviewing without Git
+## Collaborating Without Git
 
-[docs/collaborate-without-git.md](docs/collaborate-without-git.md): what goes
-into a review pack, what the co-author should look at, and what the pack
-deliberately does not claim.
+See [docs/collaborate-without-git.md](docs/collaborate-without-git.md) for how review packs allow non-technical co-authors and supervisors to review revisions via standard PDF readers and plain-text change summaries.
 
-## The local workbench
+## Verification
 
-`start-ui.bat` (Windows), `start-ui.command` (macOS) or `start-ui.sh` (Linux)
-opens a page in your browser that covers the five things a new user actually
-needs. It is a control panel for this repository, not an editor.
+To verify that all template guardrails, archive inspection, and audit tools pass locally on your machine:
 
-| Panel | What it does | What it refuses to do |
-|---|---|---|
-| Environment | checks Git, Python, latexmk, the LaTeX engine, BibTeX, Perl, and optionally VS Code and latexdiff; says what is missing, why, and the official install command | never installs anything for you |
-| Build | runs `latexmk` in the background, shows real state, exit code, duration, log tail and the first error | never runs two builds at once; never a custom command |
-| Preview | serves `build/main.pdf` with `no-store`, opens the project in VS Code when it is installed | never reads any other file |
-| Agent prompt | builds a scoped task for Claude Code / Codex from `sections/*.tex` | never calls a model, never sends anything |
-| Git | shows branch, `git status --porcelain`, `git diff --stat` and the guardrail | no commit, branch, checkout, reset or push, ever |
-
-Security: it binds `127.0.0.1` only, checks the `Host` header on every request
-(so DNS rebinding cannot reach it), requires a session cookie whose token
-arrives in the URL fragment rather than in the query string or a log, checks the
-`Origin` header on anything that changes state, and emits no CORS headers. The
-build is a fixed command with a timeout and a bounded log. The full threat model
-and what is deliberately absent is in [docs/UI-ADR.md](docs/UI-ADR.md).
-
-**What leaves your machine: nothing.** No model API, no telemetry, no external
-fonts, scripts or images. If you then hand a generated prompt to an agent, that
-tool decides what to send, under its own policy — the two are separate.
-
-## Requirements
-
-| | Minimum | Verified here |
-|---|---|---|
-| Python | 3.10+ (standard library only) | 3.13.9 |
-| Git | 2.23 (`git switch`) | 2.55.0 on Windows |
-| TeX Live | 2023, `latexmk` ≥ 4.7 | TeX Live 2025, `latexmk` 4.86a |
-| `latexdiff` + `latexpand` | any recent | `latexdiff` 1.3.4, `latexpand` 1.7.2 |
-| Python (tools only) | 3.10, standard library | 3.13.9 |
-| `pdftotext` (diff check) | optional | present via Poppler |
-
-`xelatex` and `lualatex` are supported by TeX Live but this template is only
-tested with `pdflatex`. If you need them, change `$pdf_mode` in `.latexmkrc` and
-verify the fonts yourself — the sample does not exercise them.
-
-## FAQ
-
-**Do I have to use VS Code?** No. Any editor works; LaTeX Workshop is just the
-most convenient way to get build-on-save.
-
-**Can an agent write new science?** It can write text you ask for. It must not
-invent results, references or numbers; `AGENTS.md` §4 makes those regions
-read-only unless you say otherwise.
-
-**Does the guardrail prove my paper is unchanged?** No. It reports changed
-tokens in named categories. A reordered sentence or a swapped context keeps
-every token and changes the meaning.
-
-**Do I need an API key?** No. Nothing here calls a model. Your agent brings its
-own.
-
-## Limits
-
-- The sample paper's numbers are invented; do not cite them.
-- Only `pdflatex` is tested. IEEEtran is compatible but not shipped, because
-  the class file has its own licence; keep the publisher's own files in your
-  private repository.
-- Cross-platform status is recorded honestly in
-  [tests/SELFTEST.md](tests/SELFTEST.md): Windows is verified on the recording
-  machine, macOS is `BLOCKED`, Linux CI is the runner only.
-- The tools are maintenance surface. Four scripts exist because each closes a
-  gap that an installed tool does not, and each is documented with its limits.
+```bash
+python test_verify.py
+```
 
 ## License
 
-MIT. Third-party components are used, not vendored — see
-[docs/competitor-audit.md](docs/competitor-audit.md) and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Credits and prior work
-
-Respect is due to the projects this one deliberately does not duplicate:
-[paper-lab](https://github.com/JoseAntonioNuevo/paper-lab),
-[latex-paper-skills](https://github.com/yunshenwuchuxun/latex-paper-skills),
-[paperops](https://github.com/giacomolanciano/paperops),
-[alfred](https://github.com/dreadnode/alfred),
-[PaperKit](https://github.com/peternicholls/PaperKit), and
-[`xu-cheng/latex-action`](https://github.com/xu-cheng/latex-action), which does
-the compiling in CI.
+MIT License. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
